@@ -151,8 +151,13 @@ class SpecMixin(models.AbstractModel):
             merged_class = self.env.registry[name]
             # accessed via getattr to avoid Python's name mangling of the
             # double-underscore "__base_classes" attribute set by Odoo's
-            # BaseModel._build_model()
-            merged_base_classes = merged_class._BaseModel__base_classes
+            # BaseModel._build_model(). Odoo 19 renamed this attribute to
+            # "_base_classes__" (no mangling).
+            merged_base_classes = getattr(
+                merged_class,
+                "_base_classes__",
+                getattr(merged_class, "_BaseModel__base_classes", None),
+            )
             definition_bases = tuple(
                 base for base in merged_base_classes if is_definition_class(base)
             )

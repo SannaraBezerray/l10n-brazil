@@ -77,6 +77,23 @@ class SpecModel(models.Model):
         class as long as the generated spec mixins inherit from some
         spec.mixin.<schema_name> mixin.
         """
+        cls._spec_pre_build(pool, cr)
+        return super()._build_model(pool, cr)
+
+    @classmethod
+    def _spec_pre_build(cls, pool, cr):
+        """
+        Mutate this class's `_inherit` and the schema-wide mixin/mapping
+        tables before Odoo turns the class into a concrete registry model.
+
+        Odoo <= 18 called this via the per-model `_build_model(pool, cr)`
+        classmethod hook, invoked from `Registry.load()` for every model
+        definition. Odoo 19 dropped that hook: `Registry.load()` now calls
+        the module-level `odoo.orm.model_classes.add_to_registry()`
+        function directly instead of `model_def._build_model(pool, cr)`.
+        On 19+ this method is instead invoked from the `add_to_registry`
+        monkeypatch below, applied when this module loads.
+        """
         # In Odoo 18+, the test framework monitors model attribute modifications
         # and logs stack traces. We suppress these during dynamic model building.
         with mute_logger("odoo.tests.common"):
@@ -91,9 +108,18 @@ class SpecModel(models.Model):
             ]:
                 spec_mixin = pool[f"spec.mixin.{schema}"]
                 spec_mixin._inherit = list(spec_mixin._inherit) + ["spec.mixin"]
-                spec_mixin._BaseModel__base_classes = (
-                    pool["spec.mixin"],
-                ) + spec_mixin._BaseModel__base_classes
+                # Odoo 19 renamed the mangled `_BaseModel__base_classes`
+                # attribute to `_base_classes__`.
+                base_classes_attr = (
+                    "_base_classes__"
+                    if hasattr(spec_mixin, "_base_classes__")
+                    else "_BaseModel__base_classes"
+                )
+                setattr(
+                    spec_mixin,
+                    base_classes_attr,
+                    (pool["spec.mixin"],) + getattr(spec_mixin, base_classes_attr),
+                )
                 spec_mixin.__bases__ = (pool["spec.mixin"],) + spec_mixin.__bases__
 
             parents = [
@@ -103,7 +129,6 @@ class SpecModel(models.Model):
             for parent in parents:
                 # this will register that the spec mixins where injected in this class
                 cls._map_concrete(cr.dbname, parent, cls._name)
-            return super()._build_model(pool, cr)
 
     @api.model
     def _setup_base(self):
@@ -236,6 +261,14 @@ class StackedModel(SpecModel):
 
     @classmethod
     def _build_model(cls, pool, cr):
+        cls._spec_pre_build(pool, cr)
+        return super()._build_model(pool, cr)
+
+    @classmethod
+    def _spec_pre_build(cls, pool, cr):
+        # see SpecModel._spec_pre_build for why this classmethod exists
+        # instead of doing this work in _build_model directly.
+        super()._spec_pre_build(pool, cr)
         # In Odoo 18+, the test framework monitors model attribute modifications
         # and logs stack traces. We suppress these during dynamic model building.
         with mute_logger("odoo.tests.common"):
@@ -270,7 +303,6 @@ class StackedModel(SpecModel):
         ):
             if kind == "stacked" and klass not in cls.__bases__:
                 cls._inherit.append(klass._name)
-        return super()._build_model(pool, cr)
 
     @api.model
     def _add_field(self, name, field):
@@ -364,3 +396,32 @@ class StackedModel(SpecModel):
                 yield from cls._visit_stack(env, child, stacking_settings, child_path)
             else:
                 yield "many2one", node, path, field_path, child_concrete
+
+
+try:
+    # Odoo 19+ only: Registry.load() no longer calls the per-model
+    # `_build_model(pool, cr)` classmethod hook that SpecModel/StackedModel
+    # rely on (see SpecModel._spec_pre_build's docstring). It calls the
+    # module-level odoo.orm.model_classes.add_to_registry() function
+    # directly instead. We wrap it so spec-driven model definitions still
+    # get their `_inherit` mutated before Odoo merges them into a concrete
+    # registry class.
+    from odoo.orm import model_classes as _odoo_model_classes
+
+    _original_add_to_registry = _odoo_model_classes.add_to_registry
+
+    def _add_to_registry_with_spec_pre_build(registry, model_def):
+        if issubclass(model_def, SpecModel):
+            cr = registry.cursor()
+            try:
+                model_def._spec_pre_build(registry, cr)
+            finally:
+                cr.close()
+        return _original_add_to_registry(registry, model_def)
+
+    _odoo_model_classes.add_to_registry = _add_to_registry_with_spec_pre_build
+except ImportError:
+    # Odoo <= 18: the _build_model(pool, cr) classmethod hook (still
+    # defined above for compat) is called directly by Registry.load(),
+    # so no patching is needed.
+    pass
