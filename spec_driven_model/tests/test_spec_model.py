@@ -275,8 +275,9 @@ class TestSpecModel(TransactionCase, FakeModelLoader):
 
         from odoo_test_helper.fake_model_loader import FakePackage
 
-        from odoo.models import MetaModel, is_definition_class
+        from odoo.models import MetaModel
 
+        from odoo.addons.spec_driven_model.models.spec_mixin import is_definition_class
         from odoo.addons.spec_driven_model.models.spec_models import SpecModel
 
         from .fake_comment_extension import CommentExtension

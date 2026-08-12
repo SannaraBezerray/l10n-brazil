@@ -4,8 +4,14 @@
 from importlib import import_module
 
 from odoo import api, models
-from odoo.models import is_definition_class
 from odoo.tools import mute_logger
+
+try:
+    # Odoo 19+: moved to odoo.orm.model_classes and renamed.
+    from odoo.orm.model_classes import is_model_definition as is_definition_class
+except ImportError:
+    # Odoo <= 18: original location/name.
+    from odoo.models import is_definition_class
 
 from .spec_models import SPEC_MIXIN_MAPPINGS, SpecModel, StackedModel
 
