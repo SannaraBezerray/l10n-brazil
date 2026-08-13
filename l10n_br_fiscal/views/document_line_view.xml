@@ -107,6 +107,11 @@
                         </group>
                     </page>
                     <page name="fiscal_taxes" string="Taxes" />
+                    <page
+                        name="import_declaration"
+                        string="Import Declaration"
+                        invisible="cfop_destination in ('1', '2') or fiscal_operation_type in ('out', 'all')"
+                    />
                     <page name="amounts" string="Amounts">
                         <group>
                             <group>
