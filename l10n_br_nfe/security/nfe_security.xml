@@ -29,7 +29,7 @@
 
     <record id="base.user_admin" model="res.users">
         <field
-            name="groups_id"
+            name="group_ids"
             eval="[Command.link(ref('l10n_br_nfe.group_manager'))]"
         />
     </record>
