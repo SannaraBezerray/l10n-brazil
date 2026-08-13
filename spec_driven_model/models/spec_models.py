@@ -41,6 +41,20 @@ def _prepare_and_setup_base(env, model_name):
         env[model_name]._setup_base()
 
 
+def _field_args(field):
+    """Odoo 19 renamed Field.args to Field._args__ (and made it read-only)."""
+    return field._args__ if hasattr(field, "_args__") else field.args
+
+
+def _set_field_args(field, **updates):
+    """Update a field's stored constructor kwargs, across Odoo versions."""
+    if hasattr(field, "_args__"):
+        # _args__ is a ReadonlyDict on Odoo 19+: replace it wholesale.
+        field._args__ = {**field._args__, **updates}
+    else:
+        field.args.update(updates)
+
+
 def _mutate_spec_fields_comodel(cls, env):
     """
     Remap the comodel of relational fields pointing to spec mixins that were
@@ -89,16 +103,20 @@ def _mutate_spec_fields_comodel(cls, env):
                     continue
                 inv_name = field.inverse_name
                 for n, f in comodel._fields.items():
-                    if n == inv_name and f.args and f.args.get("comodel_name"):
+                    f_args = _field_args(f)
+                    if n == inv_name and f_args and f_args.get("comodel_name"):
                         _logger.debug(
                             "    MUTATING m2o %s.%s (%s) -> %s",
                             comodel._name.split(".")[-1],
                             n,
-                            f.args["comodel_name"],
+                            f_args["comodel_name"],
                             cls._name,
                         )
-                        f.args["original_comodel_name"] = f.args["comodel_name"]
-                        f.args["comodel_name"] = cls._name
+                        _set_field_args(
+                            f,
+                            original_comodel_name=f_args["comodel_name"],
+                            comodel_name=cls._name,
+                        )
 
 
 class SelectionMuteLogger(mute_logger):
