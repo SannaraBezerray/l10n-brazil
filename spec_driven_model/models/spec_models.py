@@ -41,6 +41,66 @@ def _prepare_and_setup_base(env, model_name):
         env[model_name]._setup_base()
 
 
+def _mutate_spec_fields_comodel(cls, env):
+    """
+    Remap the comodel of relational fields pointing to spec mixins that were
+    injected into (made concrete as) some other existing model, so they
+    point to that concrete model instead of the abstract spec mixin.
+    See SpecModel._setup_fields's docstring for why this logic lives here
+    instead of directly in that method.
+    """
+    for klass in cls.__bases__:
+        if not hasattr(klass, "_is_spec_driven"):
+            continue
+        if klass._name != cls._name:
+            cls._map_concrete(env.cr.dbname, klass._name, cls._name)
+            with mute_logger("odoo.tests.common"):
+                klass._table = cls._table
+
+    stacked_parents = [getattr(x, "_name", None) for x in cls.mro()]
+    for name, field in cls._fields.items():
+        if hasattr(field, "comodel_name") and field.comodel_name:
+            comodel_name = field.comodel_name
+            comodel = env[comodel_name]
+            concrete_class = SPEC_MIXIN_MAPPINGS[env.cr.dbname].get(comodel._name)
+
+            if (
+                field.type == "many2one"
+                and concrete_class is not None
+                and comodel_name not in stacked_parents
+            ):
+                _logger.debug(
+                    "    MUTATING m2o %s (%s) -> %s", name, comodel_name, concrete_class
+                )
+                field.original_comodel_name = comodel_name
+                field.comodel_name = concrete_class
+
+            elif field.type == "one2many":
+                if concrete_class is not None:
+                    _logger.debug(
+                        "    MUTATING o2m %s (%s) -> %s",
+                        name,
+                        comodel_name,
+                        concrete_class,
+                    )
+                    field.original_comodel_name = comodel_name
+                    field.comodel_name = concrete_class
+                if not hasattr(field, "inverse_name"):
+                    continue
+                inv_name = field.inverse_name
+                for n, f in comodel._fields.items():
+                    if n == inv_name and f.args and f.args.get("comodel_name"):
+                        _logger.debug(
+                            "    MUTATING m2o %s.%s (%s) -> %s",
+                            comodel._name.split(".")[-1],
+                            n,
+                            f.args["comodel_name"],
+                            cls._name,
+                        )
+                        f.args["original_comodel_name"] = f.args["comodel_name"]
+                        f.args["comodel_name"] = cls._name
+
+
 class SelectionMuteLogger(mute_logger):
     """
     The following fields.Selection warnings seem both very hard to
@@ -167,66 +227,18 @@ class SpecModel(models.Model):
         existing concrete Odoo models. In that last case, the comodels of the
         relational fields pointing to such mixins should be remapped to the
         proper concrete models where these mixins are injected.
+
+        Odoo <= 18 called this instance method directly as part of the
+        model setup pipeline, which is why the mutation logic below lives
+        in a plain function instead (_mutate_spec_fields_comodel): Odoo 19's
+        setup_model_classes() calls the module-level
+        odoo.orm.model_classes._setup_fields(model_cls, env) function
+        instead of this instance method, so on 19+ the same mutation is
+        triggered from a monkeypatch of that function below.
         """
-        cls = type(self)
-        for klass in cls.__bases__:
-            if not hasattr(klass, "_is_spec_driven"):
-                continue
-            if klass._name != cls._name:
-                cls._map_concrete(self.env.cr.dbname, klass._name, cls._name)
-                with mute_logger("odoo.tests.common"):
-                    klass._table = cls._table
-
-        stacked_parents = [getattr(x, "_name", None) for x in cls.mro()]
-        for name, field in cls._fields.items():
-            if hasattr(field, "comodel_name") and field.comodel_name:
-                comodel_name = field.comodel_name
-                comodel = self.env[comodel_name]
-                concrete_class = SPEC_MIXIN_MAPPINGS[self.env.cr.dbname].get(
-                    comodel._name
-                )
-
-                if (
-                    field.type == "many2one"
-                    and concrete_class is not None
-                    and comodel_name not in stacked_parents
-                ):
-                    _logger.debug(
-                        "    MUTATING m2o %s (%s) -> %s",
-                        name,
-                        comodel_name,
-                        concrete_class,
-                    )
-                    field.original_comodel_name = comodel_name
-                    field.comodel_name = concrete_class
-
-                elif field.type == "one2many":
-                    if concrete_class is not None:
-                        _logger.debug(
-                            "    MUTATING o2m %s (%s) -> %s",
-                            name,
-                            comodel_name,
-                            concrete_class,
-                        )
-                        field.original_comodel_name = comodel_name
-                        field.comodel_name = concrete_class
-                    if not hasattr(field, "inverse_name"):
-                        continue
-                    inv_name = field.inverse_name
-                    for n, f in comodel._fields.items():
-                        if n == inv_name and f.args and f.args.get("comodel_name"):
-                            _logger.debug(
-                                "    MUTATING m2o %s.%s (%s) -> %s",
-                                comodel._name.split(".")[-1],
-                                n,
-                                f.args["comodel_name"],
-                                cls._name,
-                            )
-                            f.args["original_comodel_name"] = f.args["comodel_name"]
-                            f.args["comodel_name"] = self._name
-
+        _mutate_spec_fields_comodel(type(self), self.env)
         res = super()._setup_fields()
-        disambiguate_spec_labels(cls)
+        disambiguate_spec_labels(type(self))
         return res
 
     @classmethod
@@ -443,6 +455,22 @@ try:
         return _original_add_to_registry(registry, model_def)
 
     _odoo_model_classes.add_to_registry = _add_to_registry_with_spec_pre_build
+
+    # Odoo 19 also stopped calling BaseModel._setup_fields() as an instance
+    # method (which is what SpecModel._setup_fields overrides above to
+    # mutate spec-mixin field comodels once their concrete destination is
+    # known). setup_model_classes() now calls this module-level function
+    # directly instead, so wrap it the same way.
+    _original_setup_fields = _odoo_model_classes._setup_fields
+
+    def _setup_fields_with_spec_mutation(model_cls, env):
+        if issubclass(model_cls, SpecModel):
+            _mutate_spec_fields_comodel(model_cls, env)
+        _original_setup_fields(model_cls, env)
+        if issubclass(model_cls, SpecModel):
+            disambiguate_spec_labels(model_cls)
+
+    _odoo_model_classes._setup_fields = _setup_fields_with_spec_mutation
 except ImportError:
     # Odoo <= 18: the _build_model(pool, cr) classmethod hook (still
     # defined above for compat) is called directly by Registry.load(),
