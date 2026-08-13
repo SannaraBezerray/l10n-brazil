@@ -13,7 +13,58 @@ except ImportError:
     # Odoo <= 18: original location/name.
     from odoo.models import is_definition_class
 
+try:
+    # Odoo 19+: Registry.load() no longer calls the per-model
+    # _build_model(pool, cr) classmethod hook (see SpecModel._spec_pre_build's
+    # docstring); it calls this module-level function directly instead. Also,
+    # BaseModel._prepare_setup()/._setup_base()/._setup_fields() became
+    # module-level functions taking a model class instead of instance methods,
+    # and ._setup_complete() was renamed to the instance method
+    # ._post_model_setup__().
+    from odoo.orm import model_classes as _odoo_model_classes
+except ImportError:
+    _odoo_model_classes = None
+
 from .spec_models import SPEC_MIXIN_MAPPINGS, SpecModel, StackedModel
+
+
+def _module_to_models_registry():
+    """
+    Odoo 19 renamed MetaModel.module_to_models to MetaModel._module_to_models__.
+    Return a reference to the (mutable, shared) dict either way.
+    """
+    if hasattr(models.MetaModel, "_module_to_models__"):
+        return models.MetaModel._module_to_models__
+    return models.MetaModel.module_to_models
+
+
+def _build_and_register_model(model_type, registry, cr):
+    """
+    Fully register a dynamically created model class (used to concretize
+    "remaining" spec mixins not injected into any existing model), the way
+    Registry.load() would for a model defined in a module's source code.
+    """
+    if _odoo_model_classes is not None:  # Odoo 19+
+        return _odoo_model_classes.add_to_registry(registry, model_type)
+    return model_type._build_model(registry, cr)  # Odoo <= 18
+
+
+def _finish_model_setup(env, model_name):
+    """
+    Force a not-yet-fully-setup model to complete its setup, the way
+    setup_model_classes() would for every model after all modules load.
+    """
+    if _odoo_model_classes is not None:  # Odoo 19+
+        model_cls = env.registry[model_name]
+        _odoo_model_classes._prepare_setup(model_cls)
+        _odoo_model_classes._setup(model_cls, env)
+        _odoo_model_classes._setup_fields(model_cls, env)
+        model_cls(env, (), ())._post_model_setup__()
+    else:  # Odoo <= 18
+        env[model_name]._prepare_setup()
+        env[model_name]._setup_base()
+        env[model_name]._setup_fields()
+        env[model_name]._setup_complete()
 
 
 class SpecMixin(models.AbstractModel):
@@ -187,17 +238,14 @@ class SpecMixin(models.AbstractModel):
             with mute_logger("odoo.tests.common"):
                 model_type._spec_schema = spec_schema
                 model_type._spec_version = spec_version
-            models.MetaModel.module_to_models[odoo_module] += [model_type]
+            _module_to_models_registry()[odoo_module] += [model_type]
             concrete_models.append(model_type)
 
             # now we init these models properly
             # a bit like odoo.modules.loading#load_module_graph would do
-            model = model_type._build_model(self.env.registry, self.env.cr)
+            model = _build_and_register_model(model_type, self.env.registry, self.env.cr)
 
-            self.env[name]._prepare_setup()
-            self.env[name]._setup_base()
-            self.env[name]._setup_fields()
-            self.env[name]._setup_complete()
+            _finish_model_setup(self.env, name)
 
             access_fields = [
                 "id",
@@ -242,8 +290,9 @@ class SpecMixin(models.AbstractModel):
         # the model via _inherit, they break the C3 linearization and crash
         # setup_models() with an inconsistent MRO (#4668). Drop exactly the ones
         # we just built; the hook recreates them on every registry (re)load.
-        registered = models.MetaModel.module_to_models[odoo_module]
-        models.MetaModel.module_to_models[odoo_module] = [
+        module_to_models = _module_to_models_registry()
+        registered = module_to_models[odoo_module]
+        module_to_models[odoo_module] = [
             cls for cls in registered if cls not in concrete_models
         ]
 
