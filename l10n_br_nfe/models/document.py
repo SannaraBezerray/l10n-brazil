@@ -819,9 +819,10 @@ class NFe(spec_models.StackedModel):
 
     def _export_field(self, xsd_field, class_obj, member_spec, export_value=None):
         if xsd_field == "nfe40_tpAmb":
-            self.env.context = dict(self.env.context)
-            self.env.context.update({"tpAmb": self[xsd_field]})
-            return super()._export_field(
+            # env.context is read-only on Odoo 19+ (must call env() to change
+            # it); use with_context() to get a differently-scoped recordset
+            # instead of mutating self.env.context in place.
+            return super(NFe, self.with_context(tpAmb=self[xsd_field]))._export_field(
                 xsd_field, class_obj, member_spec, export_value
             )
 
