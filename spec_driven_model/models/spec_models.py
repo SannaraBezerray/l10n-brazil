@@ -12,9 +12,33 @@ from odoo.tools import mute_logger
 
 from .ir_model import disambiguate_spec_labels
 
+try:
+    # Odoo 19+: _prepare_setup()/_setup_base() were turned from BaseModel
+    # instance methods into module-level functions taking a model class
+    # (env.registry[name]) instead of a recordset.
+    from odoo.orm.model_classes import _prepare_setup as _odoo_prepare_setup
+    from odoo.orm.model_classes import _setup as _odoo_setup_base
+except ImportError:
+    _odoo_prepare_setup = None
+    _odoo_setup_base = None
+
 SPEC_MIXIN_MAPPINGS = defaultdict(dict)  # by db
 
 _logger = logging.getLogger(__name__)
+
+
+def _prepare_and_setup_base(env, model_name):
+    """
+    This is required when you don't start odoo with -i (update) otherwise
+    the model spec will not have its fields loaded yet.
+    """
+    if _odoo_prepare_setup is not None:  # Odoo 19+
+        model_cls = env.registry[model_name]
+        _odoo_prepare_setup(model_cls)
+        _odoo_setup_base(model_cls, env)
+    else:  # Odoo <= 18
+        env[model_name]._prepare_setup()
+        env[model_name]._setup_base()
 
 
 class SelectionMuteLogger(mute_logger):
@@ -343,8 +367,7 @@ class StackedModel(SpecModel):
         # TODO we may pass this env further instead of re-creating it.
         # TODO move setup_base just before the _visit_stack next call
         if node._name != cls._name or len(env[node._name]._fields.items() == 0):
-            env[node._name]._prepare_setup()
-            env[node._name]._setup_base()
+            _prepare_and_setup_base(env, node._name)
 
         field_items = [(k, f) for k, f in env[node._name]._fields.items()]
         for i in field_items:
