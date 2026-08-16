@@ -563,7 +563,9 @@ class Tax(models.Model):
         icms_cst_id = kwargs.get("icms_cst_id")
 
         if taxes_dict.get("icms"):
-            if company.state_id != partner.state_id:
+            # NOTE: company.state_id is unreliable on Odoo 19, see
+            # operation_line.py's _get_cfop for details; use partner_id.
+            if company.partner_id.state_id != partner.state_id:
                 tax_dict["base"] = taxes_dict["icms"].get("icms_dest_base", 0.0)
             else:
                 tax_dict["base"] = taxes_dict["icms"].get("base", 0.0)

@@ -506,12 +506,16 @@ class NFeLine(spec_models.StackedModel):
             xsd_fields.remove("nfe40_ICMS")
             xsd_fields.remove("nfe40_II")
 
+        # NOTE: company_id.state_id/country_id are non-stored compute fields
+        # mirrored from company_id.partner_id and unreliable on Odoo 19 (see
+        # document.py's _generate_key for details); read via partner_id.
+        company_partner = self.company_id.partner_id
         if (
             not self.icms_value
             or self.icms_value <= 0
             or self.partner_id.ind_ie_dest != "9"
-            or self.partner_id.state_id == self.company_id.state_id
-            or self.partner_id.country_id != self.company_id.country_id
+            or self.partner_id.state_id == company_partner.state_id
+            or self.partner_id.country_id != company_partner.country_id
         ):
             xsd_fields.remove("nfe40_ICMSUFDest")
 

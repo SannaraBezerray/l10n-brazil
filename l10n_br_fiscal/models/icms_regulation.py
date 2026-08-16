@@ -1934,6 +1934,11 @@ class ICMSRegulation(models.Model):
         cest=None,
     ):
         self.ensure_one()
+        # NOTE: company.state_id is a non-stored compute field mirrored
+        # from company.partner_id and unreliable on Odoo 19 (see
+        # l10n_br_fiscal/models/operation_line.py's _get_cfop for details).
+        # Read via company.partner_id instead.
+        company_state_id = company.partner_id.state_id.id
         domain = [
             ("icms_regulation_id", "=", self.id),
             ("state", "=", "approved"),
@@ -1942,7 +1947,7 @@ class ICMSRegulation(models.Model):
 
         if tax_group_icms.tax_domain in (TAX_DOMAIN_ICMS, TAX_DOMAIN_ICMS_ST):
             domain += [
-                ("state_from_id", "=", company.state_id.id),
+                ("state_from_id", "=", company_state_id),
                 ("state_to_ids", "=", partner.state_id.id),
             ]
 
@@ -1950,7 +1955,7 @@ class ICMSRegulation(models.Model):
             domain += [
                 "|",
                 ("state_to_ids", "=", partner.state_id.id),
-                ("state_to_ids", "=", company.state_id.id),
+                ("state_to_ids", "=", company_state_id),
                 ("ncm_ids", "=", ncm.id),
                 ("nbm_ids", "=", nbm.id),
                 ("cest_ids", "=", cest.id),
@@ -1961,7 +1966,7 @@ class ICMSRegulation(models.Model):
 
         if tax_group_icms.tax_domain == TAX_DOMAIN_ICMS_FCP_ST:
             domain += [
-                ("state_from_id", "=", company.state_id.id),
+                ("state_from_id", "=", company_state_id),
                 ("state_to_ids", "=", partner.state_id.id),
                 ("ncm_ids", "=", ncm.id),
                 ("nbm_ids", "=", nbm.id),
@@ -2039,9 +2044,11 @@ class ICMSRegulation(models.Model):
         tax_group_icms = self.env.ref("l10n_br_fiscal.tax_group_icms")
 
         # ICMS tax imported
+        # NOTE: company.state_id is unreliable on Odoo 19, see
+        # operation_line.py's _get_cfop for details; use company.partner_id.
         if (
             product.icms_origin in ICMS_ORIGIN_TAX_IMPORTED
-            and company.state_id != partner.state_id
+            and company.partner_id.state_id != partner.state_id
             and operation_line.fiscal_operation_type == FISCAL_OUT
             or operation_line.fiscal_operation_id.fiscal_type == "return_in"
             and operation_line.fiscal_operation_type == FISCAL_IN
@@ -2097,8 +2104,10 @@ class ICMSRegulation(models.Model):
         tax_definitions = self.env["l10n_br_fiscal.tax.definition"]
         tax_group_icms = self.env.ref("l10n_br_fiscal.tax_group_icms")
 
+        # NOTE: company.state_id is unreliable on Odoo 19, see
+        # operation_line.py's _get_cfop for details; use company.partner_id.
         if (
-            company.state_id != partner.state_id
+            company.partner_id.state_id != partner.state_id
             and partner.ind_ie_dest == NFE_IND_IE_DEST_9
             and operation_line.fiscal_operation_type == FISCAL_OUT
             or operation_line.fiscal_operation_id.fiscal_type != "return_in"
@@ -2129,8 +2138,10 @@ class ICMSRegulation(models.Model):
         tax_group_icmsfcp = self.env.ref("l10n_br_fiscal.tax_group_icmsfcp")
 
         # ICMS FCP for DIFAL
+        # NOTE: company.state_id is unreliable on Odoo 19, see
+        # operation_line.py's _get_cfop for details; use company.partner_id.
         if (
-            company.state_id != partner.state_id
+            company.partner_id.state_id != partner.state_id
             and partner.ind_ie_dest == NFE_IND_IE_DEST_9
             and operation_line.fiscal_operation_type == FISCAL_OUT
             or operation_line.fiscal_operation_id.fiscal_type == "return_in"

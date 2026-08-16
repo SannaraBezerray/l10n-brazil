@@ -23,7 +23,9 @@ class InvalidateNumber(models.Model):
         session.verify = False
         params = {
             "transmissao": TransmissaoSOAP(certificado, session),
-            "uf": self.company_id.state_id.ibge_code,
+            # NOTE: company_id.state_id is unreliable on Odoo 19, see
+            # document.py's _generate_key for details; read via partner_id.
+            "uf": self.company_id.partner_id.state_id.ibge_code,
             "versao": "4.00",
             "ambiente": self.company_id.nfe_environment,
         }

@@ -1138,7 +1138,9 @@ class NFe(spec_models.StackedModel):
 
         params = {
             "transmissao": TransmissaoSOAP(certificado, session),
-            "uf": self.company_id.state_id.ibge_code,
+            # NOTE: company_id.state_id is unreliable on Odoo 19, see
+            # _generate_key for details; read via partner_id instead.
+            "uf": self.company_id.partner_id.state_id.ibge_code,
             "versao": self.nfe_version,
             "ambiente": self.nfe_environment,
         }
@@ -1306,10 +1308,19 @@ class NFe(spec_models.StackedModel):
             return super()._generate_key()
 
         for record in self.filtered(filter_processador_edoc_nfe):
+            # NOTE: Odoo 19 regression - res.company's own state_id (and
+            # street/city/zip) is a compute='_compute_address' field mirrored
+            # from partner_id, but RecordSet.update()/write() silently fail
+            # to persist a value onto it (core Odoo bug, reproduced directly
+            # via odoo-bin shell: partner_id.state_id is correctly set, but
+            # company.state_id keeps reading back empty no matter how it's
+            # written). Read the state via company_id.partner_id instead,
+            # which is unaffected and always reflects the real saved value.
+            company_state_id = record.company_id.partner_id.state_id
             required_fields_gen_edoc = []
             if not record.company_id.vat:
                 required_fields_gen_edoc.append("CNPJ/CPF")
-            elif not record.company_id.state_id:
+            elif not company_state_id:
                 required_fields_gen_edoc.append("State Company")
             elif not record.document_type_id:
                 required_fields_gen_edoc.append("Document Type")
@@ -1328,9 +1339,7 @@ class NFe(spec_models.StackedModel):
                 ano_mes=date.strftime("%y%m").zfill(4),
                 cnpj_cpf_emitente=record.company_id.vat,
                 codigo_uf=(
-                    record.company_id.state_id
-                    and record.company_id.state_id.ibge_code
-                    or ""
+                    company_state_id and company_state_id.ibge_code or ""
                 ),
                 forma_emissao=int(self.nfe_transmission),
                 modelo_documento=record.document_type_id.code or "",
@@ -1770,15 +1779,18 @@ class NFe(spec_models.StackedModel):
         )
 
     def _prepare_nfce_danfe_values(self):
+        # NOTE: company_id.street/state_id are unreliable on Odoo 19, see
+        # _generate_key for details; read via partner_id instead.
+        company_partner = self.company_id.partner_id
         return {
             "company_ie": self.company_id.l10n_br_ie_code,
             "company_cnpj": self.company_id.vat_formatted_cnpj,
             "company_legal_name": self.company_id.legal_name,
-            "company_street": self.company_id.street,
+            "company_street": company_partner.street,
             "company_number": self.company_id.street_number,
             "company_district": self.company_id.district,
             "company_city": self.company_id.city_id.display_name,
-            "company_state": self.company_id.state_id.name,
+            "company_state": company_partner.state_id.name,
             "lines": self._prepare_nfce_danfe_line_values(),
             "total_product_quantity": len(
                 self.fiscal_line_ids.filtered(lambda line: line.product_id)

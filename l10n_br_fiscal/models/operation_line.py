@@ -162,12 +162,18 @@ class OperationLine(models.Model):
         return document_type
 
     def _get_cfop(self, company, partner):
+        # NOTE: company.state_id/country_id are non-stored compute fields
+        # mirrored from company.partner_id and unreliable on Odoo 19
+        # (RecordSet.update()/write() silently fail to persist a value onto
+        # them - reproduced directly via odoo-bin shell). Read via
+        # company.partner_id instead, which always reflects the real value.
+        company_partner = company.partner_id
         cfop = self.env["l10n_br_fiscal.cfop"]
-        if partner.state_id == company.state_id:
+        if partner.state_id == company_partner.state_id:
             cfop = self.cfop_internal_id
-        if partner.state_id != company.state_id:
+        if partner.state_id != company_partner.state_id:
             cfop = self.cfop_external_id
-        if partner.country_id != company.country_id:
+        if partner.country_id != company_partner.country_id:
             cfop = self.cfop_export_id
         return cfop
 

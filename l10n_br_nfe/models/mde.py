@@ -123,7 +123,9 @@ class MDe(models.Model):
 
         return edoc_mde(
             TransmissaoSOAP(certificado, session),
-            self.company_id.state_id.ibge_code,
+            # NOTE: company_id.state_id is unreliable on Odoo 19, see
+            # l10n_br_nfe document.py's _generate_key for details.
+            self.company_id.partner_id.state_id.ibge_code,
             ambiente=self.dfe_id.environment,
         )
 
