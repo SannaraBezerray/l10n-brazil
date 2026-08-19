@@ -113,11 +113,14 @@ class ResCompany(models.Model):
                         record.currency_id.decimal_places,
                     )
 
+    # NOTE: store=True here for the same reason as l10n_br_base's res_company
+    # override - see the comment above l10n_br_base's `street` field.
     legal_nature_id = fields.Many2one(
         comodel_name="l10n_br_fiscal.legal.nature",
         string="Legal Nature",
         compute="_compute_address",
         inverse="_inverse_legal_nature_id",
+        store=True,
     )
 
     cnae_main_id = fields.Many2one(
@@ -127,6 +130,7 @@ class ResCompany(models.Model):
         domain="[('internal_type', '=', 'normal'), "
         "('id', 'not in', cnae_secondary_ids)]",
         string="Main CNAE",
+        store=True,
     )
 
     cnae_secondary_ids = fields.Many2many(
@@ -140,6 +144,7 @@ class ResCompany(models.Model):
         default=TAX_FRAMEWORK_NORMAL,
         compute="_compute_address",
         inverse="_inverse_tax_framework",
+        store=True,
     )
 
     profit_calculation = fields.Selection(

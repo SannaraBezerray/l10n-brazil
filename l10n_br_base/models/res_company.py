@@ -71,37 +71,78 @@ class Company(models.Model):
         for company in self:
             company.partner_id.l10n_br_isuf_code = company.l10n_br_isuf_code
 
+    # NOTE: Odoo 19 regression - RecordSet.update()/write() silently fail to
+    # persist a value onto a compute+inverse field that isn't store=True
+    # (reproduced directly via odoo-bin shell: the inverse correctly writes
+    # partner_id.state_id/street/etc., but re-reading company.state_id right
+    # after - even after invalidate_recordset()+flush - keeps coming back
+    # empty). Core Odoo's own res.company address fields (street, street2,
+    # city, zip, state_id, country_id) have the exact same shape and are
+    # affected too - they're re-declared with store=True below. Making all
+    # of these fields store=True is exactly what fixes it: once stored, the
+    # compute's result is genuinely persisted like any other field instead
+    # of being silently dropped.
+    street = fields.Char(compute="_compute_address", inverse="_inverse_street", store=True)
+
+    street2 = fields.Char(
+        compute="_compute_address", inverse="_inverse_street2", store=True
+    )
+
+    city = fields.Char(compute="_compute_address", inverse="_inverse_city", store=True)
+
+    zip = fields.Char(compute="_compute_address", inverse="_inverse_zip", store=True)
+
+    state_id = fields.Many2one(
+        comodel_name="res.country.state",
+        compute="_compute_address",
+        inverse="_inverse_state",
+        string="Fed. State",
+        domain="[('country_id', '=?', country_id)]",
+        store=True,
+    )
+
     legal_name = fields.Char(
         compute="_compute_address",
         inverse="_inverse_legal_name",
+        store=True,
     )
 
     district = fields.Char(
         compute="_compute_address",
         inverse="_inverse_district",
+        store=True,
     )
 
     street_name = fields.Char(
         compute="_compute_address",
         inverse="_inverse_street_name",
+        store=True,
     )
 
     street_number = fields.Char(
         compute="_compute_address",
         inverse="_inverse_street_number",
+        store=True,
     )
 
     city_id = fields.Many2one(
         domain="[('state_id', '=', state_id)]",
         compute="_compute_address",
         inverse="_inverse_city_id",
+        store=True,
     )
 
-    country_id = fields.Many2one(default=lambda self: self.env.ref("base.br"))
+    country_id = fields.Many2one(
+        compute="_compute_address",
+        inverse="_inverse_country",
+        default=lambda self: self.env.ref("base.br"),
+        store=True,
+    )
 
     l10n_br_ie_code = fields.Char(
         compute="_compute_address",
         inverse="_inverse_l10n_br_ie_code",
+        store=True,
     )
 
     state_tax_number_ids = fields.One2many(
@@ -115,11 +156,13 @@ class Company(models.Model):
     l10n_br_im_code = fields.Char(
         compute="_compute_address",
         inverse="_inverse_l10n_br_im_code",
+        store=True,
     )
 
     l10n_br_isuf_code = fields.Char(
         compute="_compute_address",
         inverse="_inverse_l10n_br_isuf_code",
+        store=True,
     )
 
     @api.model
