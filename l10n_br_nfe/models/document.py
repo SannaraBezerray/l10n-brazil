@@ -1117,6 +1117,13 @@ class NFe(spec_models.StackedModel):
         for record in self.filtered(filter_processador_edoc_nfe):
             record.flush_model()
             self.env.invalidate_all()
+            # tpAmb precisa estar no contexto desde o inicio da travessia:
+            # with_context() (ao contrario da mutacao direta de env.context
+            # usada no Odoo <=18) nao se propaga para chamadas de
+            # _build_binding feitas mais adiante na arvore (ex: dest), entao
+            # setar apenas dentro do _export_field de nfe40_tpAmb nao e
+            # suficiente para acionar o xNome de homologacao no destinatario.
+            record = record.with_context(tpAmb=record.nfe40_tpAmb)
             inf_nfe = record._build_binding("nfe", "40")
 
             inf_nfe_supl = None
