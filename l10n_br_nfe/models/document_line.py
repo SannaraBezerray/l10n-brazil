@@ -7,7 +7,8 @@ from enum import Enum
 
 from nfelib.nfe.bindings.v4_0.dfe_tipos_basicos_v1_00 import Tcibs, TtribNfe
 
-from odoo import api, fields
+from odoo import _, api, fields
+from odoo.exceptions import UserError
 
 from odoo.addons.l10n_br_fiscal.constants.fiscal import (
     CFOP_DESTINATION_EXTERNAL,
@@ -770,6 +771,20 @@ class NFeLine(spec_models.StackedModel):
         # TODO Not Implemented
         if "nfe40_ICMSST" in xsd_fields:
             xsd_fields.remove("nfe40_ICMSST")
+
+        if not self.nfe40_choice_icms:
+            raise UserError(
+                _(
+                    "Não foi possível determinar o grupo de tributação do ICMS "
+                    "para a linha do produto '%(product)s' (CST/CSOSN: '%(cst)s'). "
+                    "Verifique se a Operação Fiscal da linha possui um CST/CSOSN "
+                    "de ICMS válido configurado."
+                )
+                % {
+                    "product": self.product_id.display_name,
+                    "cst": self.icms_cst_id.code or _("não definido"),
+                }
+            )
 
         xsd_fields = [self.nfe40_choice_icms]
         icms_tag = (
