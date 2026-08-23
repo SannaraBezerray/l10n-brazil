@@ -55,6 +55,8 @@ class AccountMove(models.Model):
         comodel_name="l10n_br_fiscal.document",
         string="Fiscal Document",
         copy=False,
+        delegate=True,
+        required=True,
         ondelete="cascade",
         store=True,
         readonly=False,

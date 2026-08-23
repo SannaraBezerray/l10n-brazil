@@ -31,6 +31,8 @@ class AccountMoveLine(models.Model):
         comodel_name="l10n_br_fiscal.document.line",
         string="Fiscal Document Line",
         copy=False,
+        delegate=True,
+        required=True,
         ondelete="cascade",
         index="btree_not_null",
     )

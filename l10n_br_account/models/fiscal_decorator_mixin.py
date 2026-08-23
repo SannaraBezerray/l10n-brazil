@@ -4,23 +4,8 @@
 import logging
 
 from odoo import api, models
-from odoo.tools import mute_logger
 
 _logger = logging.getLogger(__name__)
-
-
-class InheritsCheckMuteLogger(mute_logger):
-    """
-    Mute the Model#_inherits_check warning
-    because the _inherits field is not required.
-    (some account.move may have no fiscal document)
-    """
-
-    def filter(self, record):
-        msg = record.getMessage()
-        if "Field definition for _inherits reference" in msg:
-            return 0
-        return super().filter(record)
 
 
 class FiscalDecoratorMixin(models.AbstractModel):
@@ -30,19 +15,21 @@ class FiscalDecoratorMixin(models.AbstractModel):
     """
     _fiscal_decorator_model = None
 
-    @api.model
-    def _inherits_check(self):
-        """
-        Overriden to avoid the super method to set the fiscal_document(_line)_id
-        field as required.
-        """
-        with InheritsCheckMuteLogger("odoo.models"):  # mute spurious warnings
-            res = super()._inherits_check()
-        if self._fiscal_decorator_model is not None:
-            field_name = self._inherits[self._fiscal_decorator_model]
-            field = self._fields.get(field_name)
-            field.required = False  # unset the required = True assignement
-        return res
+    # NOTE: on Odoo <= 18 the fiscal_document(_line)_id delegate field was left
+    # non-required on purpose (some account.move have no fiscal document), and
+    # this mixin used to override _inherits_check() to unset the required=True
+    # the ORM auto-assigned. Odoo 19 hard-enforces delegate=True, required=True
+    # and ondelete in ('cascade', 'restrict') on _inherits fields at model-class
+    # setup time (odoo.orm.model_classes._check_inherits), raising a TypeError
+    # that can't be worked around after the fact. fiscal_document(_line)_id is
+    # now declared required=True directly on the field: Odoo's own _inherits
+    # create() logic transparently auto-creates an (empty, cheap - neither
+    # l10n_br_fiscal.document nor .document.line has any other required field)
+    # fiscal document for every account.move(.line) that doesn't explicitly
+    # supply one, so callers still don't need to pass fiscal data. The real
+    # "is this actually a Brazilian fiscal document" signal used throughout
+    # this module was always document_type_id being set, never whether
+    # fiscal_document_id merely existed, so this doesn't change behavior.
 
     @api.model_create_multi
     def create(self, vals_list):
