@@ -65,7 +65,7 @@ class L10nBrSaleDiscount(TransactionCase):
                 "name": cls.product.name,
                 "product_id": cls.product.id,
                 "product_uom_qty": 1,
-                "product_uom": cls.product.uom_id.id,
+                "product_uom_id": cls.product.uom_id.id,
                 "price_unit": 1000.00,
                 "order_id": cls.order.id,
                 "fiscal_operation_id": cls.env.ref("l10n_br_fiscal.fo_venda").id,

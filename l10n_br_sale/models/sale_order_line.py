@@ -54,7 +54,7 @@ class SaleOrderLine(models.Model):
     )
 
     uom_id = fields.Many2one(
-        related="product_uom",
+        related="product_uom_id",
     )
 
     tax_framework = fields.Selection(
